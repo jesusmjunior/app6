@@ -7,7 +7,6 @@ import altair as alt
 from datetime import datetime, timedelta
 from io import BytesIO
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import smtplib
 from email.message import EmailMessage
 
@@ -94,44 +93,16 @@ with tabs[3]:
     ws = wb.active
     ws.title = "Pedido_COGEX"
 
-    vin_color = "7B1F2F"
-    yellow_fill = PatternFill(start_color="FFF200", end_color="FFF200", fill_type="solid")
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-
-    ws.merge_cells('A1:D1')
-    ws['A1'] = "CORREGEDORIA DO FORO EXTRAJUDICIAL"
-    ws['A1'].font = Font(bold=True, color="FFFFFF", size=14)
-    ws['A1'].alignment = Alignment(horizontal="center")
-    ws['A1'].fill = PatternFill(start_color=vin_color, end_color=vin_color, fill_type="solid")
-
-    ws.merge_cells('A2:D2')
-    ws['A2'] = "PEDIDO DE MATERIAL AUTOMÁTICO COGEX-MA"
-    ws['A2'].font = Font(bold=True, color="000000", size=12)
-    ws['A2'].alignment = Alignment(horizontal="center")
-    ws['A2'].fill = yellow_fill
-
+    ws.append(["CORREGEDORIA DO FORO EXTRAJUDICIAL"])
+    ws.append(["PEDIDO DE MATERIAL AUTOMÁTICO COGEX-MA"])
     ws.append([])
     ws.append(["Item ID", "Name", "Estoque Atual", "Quantidade Pedido"])
-
-    for cell in ws[4]:
-        cell.font = Font(bold=True, color="000000")
-        cell.fill = yellow_fill
-        cell.alignment = Alignment(horizontal="center")
-        cell.border = thin_border
 
     for row in pedido_exportar.itertuples(index=False):
         ws.append(row)
 
-    for row in ws.iter_rows(min_row=5, max_col=4):
-        for cell in row:
-            cell.border = thin_border
-            cell.alignment = Alignment(horizontal="center")
-
-    footer_row = ws.max_row + 2
-    ws.merge_cells(f'A{footer_row}:D{footer_row}')
-    ws[f'A{footer_row}'] = "Corregedoria Geral do Foro Extrajudicial - Rua Cumã, nº 300, 1º andar, Edifício Manhattan Center III, Jardim Renascença 2 - São Luís - Maranhão CEP 65.075-700"
-    ws[f'A{footer_row}'].alignment = Alignment(horizontal="center")
-    ws[f'A{footer_row}'].font = Font(size=9, italic=True)
+    ws.append([])
+    ws.append(["Corregedoria Geral do Foro Extrajudicial - Rua Cumã, nº 300, 1º andar, Edifício Manhattan Center III, Jardim Renascença 2 - São Luís - Maranhão CEP 65.075-700"])
 
     excel_output = BytesIO()
     wb.save(excel_output)
@@ -143,7 +114,6 @@ with tabs[3]:
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
 
-    # Botão de envio por e-mail
     if st.button("📧 Enviar Pedido por E-mail"):
         msg = EmailMessage()
         msg['Subject'] = f'Pedido Material COGEX - {dias_opcao}'
@@ -161,7 +131,6 @@ with tabs[3]:
         except Exception as e:
             st.error(f"Erro ao enviar e-mail: {e}")
 
-    # Botão imprimir (abre o print dialog do navegador)
     st.markdown("""
         <script>
         function printPage() {
