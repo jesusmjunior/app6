@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
