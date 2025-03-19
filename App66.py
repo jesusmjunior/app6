@@ -16,7 +16,17 @@ DICIONARIO_LOGICO = {
     'dias_cobertura': [7, 15, 30, 45],
     'fuzzy_critico': 7,
     'fuzzy_alerta': 15,
-    'variabilidade_alta': 30  # Coeficiente de variação em %
+    'variabilidade_alta': 30,  # Coeficiente de variação em %
+    'cores_criticidade': {
+        'Crítico e Instável': '#FF0000',
+        'Crítico': '#FFA500',
+        'Instável': '#FFFF00',
+        'Ok': '#008000'
+    },
+    'tipos_graficos': {
+        'quadrante': 'scatter',
+        'ranking': 'bar'
+    }
 }
 
 # -------------------- CARREGAMENTO DE DADOS --------------------
@@ -114,12 +124,12 @@ elif menu == "Alertas & Rankings":
     st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade']], use_container_width=True)
 
     st.subheader("Gráfico Quadrante: Cobertura vs Variabilidade")
-    fig = px.scatter(criticos, x='Cobertura Atual (dias)', y='Coeficiente Variação (%)', color='Criticidade', hover_data=['Name'], title='Cobertura x Variabilidade')
+    fig = px.scatter(criticos, x='Cobertura Atual (dias)', y='Coeficiente Variação (%)', color='Criticidade', color_discrete_map=DICIONARIO_LOGICO['cores_criticidade'], hover_data=['Name'], title='Cobertura x Variabilidade')
     st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Ranking de Consumo (Top 10)")
     ranking = pedido_alerta.sort_values(by='Consumo Médio Diário', ascending=False).head(10)
-    fig = px.bar(ranking, x='Name', y='Consumo Médio Diário', color='Criticidade', title='Top 10 Consumo Médio Diário')
+    fig = px.bar(ranking, x='Name', y='Consumo Médio Diário', color='Criticidade', color_discrete_map=DICIONARIO_LOGICO['cores_criticidade'], title='Top 10 Consumo Médio Diário')
     st.plotly_chart(fig, use_container_width=True)
 
 # -------------------- RODAPÉ --------------------
