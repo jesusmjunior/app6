@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px  # Certifique-se de adicionar 'plotly' ao requirements.txt
+import matplotlib.pyplot as plt
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
+
 st.title("📦 COGEX ALMOXARIFADO")
 st.markdown("**Sistema Integrado Google Sheets - Controle Matemático e Visual de Estoque com Lógica Fuzzy Avançada**")
 
@@ -15,17 +16,7 @@ DICIONARIO_LOGICO = {
     'dias_cobertura': [7, 15, 30, 45],
     'fuzzy_critico': 7,
     'fuzzy_alerta': 15,
-    'variabilidade_alta': 30,  # Coeficiente de variação em %
-    'cores_criticidade': {
-        'Crítico e Instável': '#FF0000',
-        'Crítico': '#FFA500',
-        'Instável': '#FFFF00',
-        'Ok': '#008000'
-    },
-    'tipos_graficos': {
-        'quadrante': 'scatter',
-        'ranking': 'bar'
-    }
+    'variabilidade_alta': 30  # Coeficiente de variação em %
 }
 
 # -------------------- CARREGAMENTO DE DADOS --------------------
@@ -123,13 +114,25 @@ elif menu == "Alertas & Rankings":
     st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade']], use_container_width=True)
 
     st.subheader("Gráfico Quadrante: Cobertura vs Variabilidade")
-    fig = px.scatter(criticos, x='Cobertura Atual (dias)', y='Coeficiente Variação (%)', color='Criticidade', color_discrete_map=DICIONARIO_LOGICO['cores_criticidade'], hover_data=['Name'], title='Cobertura x Variabilidade')
-    st.plotly_chart(fig, use_container_width=True)
+    fig, ax = plt.subplots()
+    colors = {'🔴 Crítico e Instável': 'red', '🟠 Crítico': 'orange', '🟡 Instável': 'yellow', '🟢 Ok': 'green'}
+    for crit, color in colors.items():
+        subset = criticos[criticos['Criticidade'] == crit]
+        ax.scatter(subset['Cobertura Atual (dias)'], subset['Coeficiente Variação (%)'], label=crit, color=color)
+    ax.set_xlabel('Cobertura Atual (dias)')
+    ax.set_ylabel('Coeficiente Variação (%)')
+    ax.legend()
+    st.pyplot(fig)
 
     st.subheader("Ranking de Consumo (Top 10)")
     ranking = pedido_alerta.sort_values(by='Consumo Médio Diário', ascending=False).head(10)
-    fig = px.bar(ranking, x='Name', y='Consumo Médio Diário', color='Criticidade', color_discrete_map=DICIONARIO_LOGICO['cores_criticidade'], title='Top 10 Consumo Médio Diário')
-    st.plotly_chart(fig, use_container_width=True)
+    fig, ax = plt.subplots()
+    ax.bar(ranking['Name'], ranking['Consumo Médio Diário'], color='blue')
+    ax.set_xlabel('Nome do Item')
+    ax.set_ylabel('Consumo Médio Diário')
+    ax.set_title('Top 10 Consumo Médio Diário')
+    plt.xticks(rotation=45, ha='right')
+    st.pyplot(fig)
 
 # -------------------- RODAPÉ --------------------
 st.markdown("---")
