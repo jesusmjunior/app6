@@ -1,134 +1,149 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+from datetime import datetime
 
-# -------------------- CONFIGURAÇÕES INICIAIS --------------------
-st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
+# ==============================
+# 1. Função para carregar dados
+# ==============================
+@st.cache_data
+def carregar_dados():
+    items_url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?output=csv&gid=1011017078'
+    inventory_url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?output=csv&gid=1710164548'
 
-st.title("📦 COGEX ALMOXARIFADO")
-st.markdown("**Sistema Web - Controle Matemático de Estoque - Pedido Automatizado com Critérios Reais**")
+    items_df = pd.read_csv(items_url)
+    inventory_df = pd.read_csv(inventory_url)
+    inventory_df['DateTime'] = pd.to_datetime(inventory_df['DateTime'], errors='coerce', dayfirst=True)
 
-# -------------------- CONFIGURAÇÕES --------------------
-DICIONARIO_LOGICO = {
-    'dias_cobertura': [7, 15, 30, 45],
-    'critico_limite': 0,  # Estoque negativo ou zero
-    'alerta_limite': 1    # Cobertura inferior ao consumo de 15 dias
-}
+    return items_df, inventory_df
 
-# -------------------- CARREGAMENTO DE DADOS --------------------
-@st.cache_data(show_spinner="Carregando dados do Google Sheets...")
-def load_data():
-    url_inventory = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?gid=1710164548&single=true&output=csv'
-    url_items = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?gid=1011017078&single=true&output=csv'
-    
-    inventory = pd.read_csv(url_inventory)
-    inventory['DateTime'] = pd.to_datetime(inventory['DateTime'], errors='coerce')
-    items = pd.read_csv(url_items)
-    return items, inventory
+# ==============================
+# 2. Função de preparação e limpeza
+# ==============================
+def preparar_dados(items_df, inventory_df):
+    items_df['Item ID'] = items_df['Item ID'].str.strip()
+    inventory_df['Item ID'] = inventory_df['Item ID'].str.strip()
+    return items_df, inventory_df
 
-items_df, inventory_df = load_data()
+# ==============================
+# 3. Função de cálculo de estoque
+# ==============================
+def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dias_media, modo_manual):
+    inicio_periodo = pd.to_datetime('2019-11-01')
+    fim_periodo = pd.to_datetime('2020-02-02')
 
-# -------------------- FUNÇÕES MATEMÁTICAS --------------------
-def calcular_consumo_medio(inventory):
-    consumo = inventory[inventory['Amount'] < 0].groupby('Item ID')['Amount'].sum().abs()
-    dias = (inventory['DateTime'].max() - inventory['DateTime'].min()).days
-    consumo_medio = consumo / dias
-    return consumo_medio
+    periodo_pre_d = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) &
+                                 (inventory_df['DateTime'] <= fim_periodo) &
+                                 (inventory_df['DateTime'].dt.strftime('%Y-%m-%d') != '2020-02-12')].copy()
 
-def calcular_saldo_atual(inventory):
-    saldo = inventory.groupby('Item ID')['Amount'].sum()
-    return saldo
+    entradas = periodo_pre_d[periodo_pre_d['Amount'] > 0]
+    saidas = periodo_pre_d[periodo_pre_d['Amount'] < 0]
 
-def gerar_pedido(data_proximo_pedido, intervalo_novo_pedido):
-    consumo_medio = calcular_consumo_medio(inventory_df)
-    saldo = calcular_saldo_atual(inventory_df)
+    estoque_atual = periodo_pre_d.groupby('Item ID')['Amount'].sum().reset_index()
+    estoque_atual.columns = ['Item ID', 'Estoque Atual']
 
-    pedido_df = pd.merge(items_df[['Item ID', 'Name', 'Description']], saldo.reset_index(), on='Item ID', how='left')
-    pedido_df = pd.merge(pedido_df, consumo_medio.reset_index(), on='Item ID', how='left', suffixes=('_Estoque', '_Consumo'))
+    ultimos_dias = inventory_df[inventory_df['DateTime'] >= (inventory_df['DateTime'].max() - pd.Timedelta(days=dias_media))]
+    saidas_futuro = ultimos_dias[ultimos_dias['Amount'] < 0].copy()
+    saidas_futuro['Amount'] = saidas_futuro['Amount'].abs()
+    dias_totais = dias_media or 1
+    consumo_medio = saidas_futuro.groupby('Item ID')['Amount'].sum() / dias_totais
+    consumo_medio = consumo_medio.reset_index()
+    consumo_medio.columns = ['Item ID', 'Consumo Médio Diário']
 
-    pedido_df = pedido_df.fillna({'Amount_Estoque': 0, 'Amount_Consumo': 0})
+    resultado = pd.merge(estoque_atual, consumo_medio, on='Item ID', how='left')
+    resultado['Consumo Médio Diário'].fillna(0, inplace=True)
 
-    dias_ate_pedido = (pd.to_datetime(data_proximo_pedido) - pd.to_datetime('today')).days
+    if modo_manual:
+        mapeamento_nome = {
+            'item-123': 'Limpa Vidros 3 em 1',
+            'item-345': 'Papel Higiênico Velud Vip',
+            'item-567': 'Produto Desconhecido'
+        }
+        mapeamento_desc = {
+            'item-123': 'Limpa, desembaça e protege superfícies de vidro. Produto pronto uso. 500 mL.',
+            'item-345': 'Folha dupla, alta maciez, 4 rolos de 30m x 10cm. Neutro e 100% celulose virgem.',
+            'item-567': 'Sem descrição disponível.'
+        }
+        resultado['Nome Produto'] = resultado['Item ID'].map(mapeamento_nome)
+        resultado['Descrição'] = resultado['Item ID'].map(mapeamento_desc)
+    else:
+        nome_map = dict(zip(items_df['Item ID'], items_df['Name']))
+        desc_map = dict(zip(items_df['Item ID'], items_df['Description']))
+        resultado['Nome Produto'] = resultado['Item ID'].map(nome_map)
+        resultado['Descrição'] = resultado['Item ID'].map(desc_map)
 
-    pedido_df['Consumo Médio Diário'] = pedido_df['Amount_Consumo']
-    pedido_df['Estoque Atual'] = pedido_df['Amount_Estoque']
-    pedido_df['Dias até Pedido'] = dias_ate_pedido
+    for dias in [7, 15, 30, 45]:
+        resultado[f'Necessidade {dias} dias'] = resultado['Consumo Médio Diário'] * dias
 
-    for dias in DICIONARIO_LOGICO['dias_cobertura']:
-        pedido_df[f'Necessidade {dias} dias'] = (pedido_df['Consumo Médio Diário'] * dias).round()
-        pedido_df[f'A Pedir {dias} dias'] = pedido_df.apply(lambda row: max(row[f'Necessidade {dias} dias'] - row['Estoque Atual'], 0), axis=1)
+    resultado['Estoque Mínimo'] = resultado['Consumo Médio Diário'] * 30 * (estoque_seguranca / 100)
 
-    pedido_df['Estoque Necessário até Pedido'] = (pedido_df['Consumo Médio Diário'] * dias_ate_pedido).round()
-    pedido_df['Faltante Até Pedido'] = pedido_df['Estoque Necessário até Pedido'] - pedido_df['Estoque Atual']
+    def definir_status(row):
+        if (row['Estoque Atual'] - row['Necessidade 15 dias']) < row['Estoque Mínimo']:
+            return 'Vermelho - Alerta Crítico'
+        elif (row['Estoque Atual'] - row['Necessidade 30 dias']) < row['Estoque Mínimo']:
+            return 'Amarelo - Alerta Médio'
+        else:
+            return 'Verde - OK'
 
-    pedido_df['Status'] = pedido_df.apply(lambda row: '🔴 Crítico' if row['Estoque Atual'] <= DICIONARIO_LOGICO['critico_limite'] or row['Estoque Atual'] < row['Estoque Necessário até Pedido'] else ('🟡 Alerta' if row['Estoque Atual'] < row['Consumo Médio Diário'] * 15 else '🟢 Ok'), axis=1)
+    resultado['Status'] = resultado.apply(definir_status, axis=1)
 
-    return pedido_df
+    return resultado, entradas, saidas, periodo_pre_d
 
-# -------------------- INTERFACE STREAMLIT --------------------
-menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alertas & Rankings", "Histórico & Análise"])
+# ==============================
+# 4. Função para gerar pedido exportável
+# ==============================
+def gerar_pedido(resultado, periodo):
+    pedido = resultado.copy()
+    pedido['Qtd a Pedir'] = (pedido[f'Necessidade {periodo} dias'] - pedido['Estoque Atual'] + pedido['Estoque Mínimo']).apply(lambda x: max(0, round(x)))
+    return pedido
 
-if menu == "Pedido Automático de Material":
-    st.header("📄 PEDIDO DE MATERIAL PARA 7, 15, 30 E 45 DIAS")
-    data_proximo_pedido = st.date_input("Data do Próximo Pedido")
-    intervalo_novo_pedido = st.number_input("Intervalo entre Pedidos (dias):", min_value=1, value=15)
+# ==============================
+# 5. INÍCIO STREAMLIT APP
+# ==============================
+st.set_page_config(page_title="📦 Dashboard Estoque", layout="wide")
+st.title("📦 Dashboard de Controle de Estoque - Dados Reais")
 
-    pedido = gerar_pedido(data_proximo_pedido, intervalo_novo_pedido)
+items_df, inventory_df = carregar_dados()
+items_df, inventory_df = preparar_dados(items_df, inventory_df)
 
-    st.subheader("Resumo do Pedido de Material para cada período:")
-    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Consumo Médio Diário', 'Dias até Pedido', 'Estoque Necessário até Pedido', 'Faltante Até Pedido', 'Status'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
+st.sidebar.header("Parâmetros")
+data_pedido = st.sidebar.date_input("Data do Próximo Pedido:", datetime.today())
+periodo = st.sidebar.selectbox("Período para Pedido:", [7, 15, 30, 45])
+estoque_seguranca = st.sidebar.slider("% Estoque de Segurança:", 10, 100, 50, step=10)
+dias_media = st.sidebar.slider("Dias para Média de Consumo:", 15, 120, 60, step=15)
+modo_manual = st.sidebar.checkbox("Usar Mapeamento Manual de Produtos", value=True)
+
+if st.sidebar.button("Atualizar Estoque"):
+    resultado, entradas, saidas, inventario = calcular_estoque(items_df, inventory_df, pd.to_datetime(data_pedido), estoque_seguranca, dias_media, modo_manual)
+
+    st.subheader("📋 Histórico de Movimentação (Novembro a 02/02, sem 12/02)")
+    st.dataframe(inventario[['Item ID', 'DateTime', 'Amount']])
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("### ➕ Entradas de Estoque")
+        st.dataframe(entradas[['Item ID', 'DateTime', 'Amount']])
+    with col2:
+        st.write("### ➖ Saídas de Estoque")
+        st.dataframe(saidas[['Item ID', 'DateTime', 'Amount']])
+
+    st.subheader(f"📅 Status dos Produtos para {periodo} dias")
+    status_tabs = st.tabs(["🔴 Crítico", "🟡 Médio", "🟢 OK"])
+
+    for idx, status in enumerate(['Vermelho - Alerta Crítico', 'Amarelo - Alerta Médio', 'Verde - OK']):
+        with status_tabs[idx]:
+            st.dataframe(resultado[resultado['Status'] == status][['Item ID', 'Nome Produto', 'Descrição', 'Estoque Atual', f'Necessidade {periodo} dias', 'Estoque Mínimo', 'Status']])
+
+    st.subheader("📄 Pedido de Material")
+    pedido = gerar_pedido(resultado, periodo)
+    st.dataframe(pedido[['Item ID', 'Nome Produto', 'Descrição', 'Estoque Atual', f'Necessidade {periodo} dias', 'Qtd a Pedir']])
 
     csv = pedido.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Pedido XLS", data=csv, file_name=f'COGEX_ALMOXARIFADO_PEDIDO_MATERIAL.csv', mime='text/csv')
+    st.download_button(
+        label=f"📥 Download Pedido de Material para {periodo} dias",
+        data=csv,
+        file_name=f'Pedido_Material_{periodo}_dias.csv',
+        mime='text/csv'
+    )
 
-    st.subheader("📊 Gráficos Estoque por Status")
-
-    status_cores = {'🔴 Crítico': 'red', '🟡 Alerta': 'orange', '🟢 Ok': 'green'}
-    for status, cor in status_cores.items():
-        subset = pedido[pedido['Status'] == status]
-        if not subset.empty:
-            st.subheader(f"{status} - {len(subset)} produtos")
-            fig, ax = plt.subplots(figsize=(10,5))
-            subset.plot(kind='bar', x='Name', y='Estoque Atual', color=cor, ax=ax)
-            plt.xticks(rotation=90)
-            plt.title(f'Produtos {status}')
-            st.pyplot(fig)
-
-elif menu == "Alertas & Rankings":
-    st.header("🚨 Itens Críticos, Alerta ou Ok")
-
-    data_proximo_pedido = pd.to_datetime('today') + pd.Timedelta(days=15)
-    pedido_alerta = gerar_pedido(data_proximo_pedido, 15)
-
-    st.subheader("Itens com Estoque Crítico ou Alerta")
-    criticos = pedido_alerta[pedido_alerta['Status'] != '🟢 Ok']
-    st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Estoque Necessário até Pedido', 'Status']], use_container_width=True)
-
-    st.subheader("Ranking de Consumo (Top 10)")
-    ranking = pedido_alerta.sort_values(by='Consumo Médio Diário', ascending=False).head(10)
-    st.bar_chart(ranking.set_index('Name')['Consumo Médio Diário'])
-
-elif menu == "Histórico & Análise":
-    st.header("📊 Análise Histórica de Consumo e Estoque")
-    st.subheader("Histórico Completo de Movimentação")
-    st.dataframe(inventory_df[['Inventory ID', 'Item ID', 'DateTime', 'Amount']], use_container_width=True)
-
-    st.subheader("Total de Movimentações por Item")
-    total_mov = inventory_df.groupby('Item ID')['Amount'].count().reset_index(name='Total Movimentações')
-    total_mov = pd.merge(total_mov, items_df[['Item ID', 'Name']], on='Item ID', how='left')
-    st.dataframe(total_mov[['Item ID', 'Name', 'Total Movimentações']], use_container_width=True)
-
-    st.subheader("Gráfico Histórico de Entradas e Saídas")
-    entradas_saidas = inventory_df.copy()
-    entradas_saidas['Mês/Ano'] = entradas_saidas['DateTime'].dt.to_period('M')
-    entradas_saidas = entradas_saidas.groupby(['Mês/Ano'])['Amount'].sum().reset_index()
-    fig, ax = plt.subplots()
-    ax.bar(entradas_saidas['Mês/Ano'].astype(str), entradas_saidas['Amount'])
-    plt.xticks(rotation=90)
-    plt.title('Saldo Mensal de Movimentação')
-    st.pyplot(fig)
-
-# -------------------- RODAPÉ --------------------
-st.markdown("---")
-st.markdown("**COGEX ALMOXARIFADO - Gestão Matemática Real com Critérios de Estoque | Powered by Streamlit**")
+else:
+    st.info("Clique no botão 'Atualizar Estoque' para processar os dados.
