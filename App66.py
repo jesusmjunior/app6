@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
@@ -15,7 +16,9 @@ DICIONARIO_LOGICO = {
     'dias_cobertura': [7, 15, 30, 45],
     'fuzzy_critico': 7,
     'fuzzy_alerta': 15,
-    'variabilidade_alta': 30  # Coeficiente de variação em %
+    'variabilidade_alta': 30,  # Coeficiente de variação em %
+    'fator_seguro': 1.5,       # Novo fator para buffer dinâmico
+    'min_historico': 5         # Mínimo de registros para análise confiável
 }
 
 # -------------------- CARREGAMENTO DE DADOS --------------------
@@ -46,7 +49,17 @@ def calcular_variabilidade(inventory):
     variabilidade = inventory[inventory['Amount'] < 0].groupby('Item ID')['Amount'].std().fillna(0)
     return variabilidade
 
-def pertinencia_fuzzy_avancado(cobertura, variabilidade):
+def contar_registros(inventory):
+    registros = inventory.groupby('Item ID')['Amount'].count()
+    return registros
+
+# Função matemática para buffer dinâmico
+def calcular_buffer_dinamico(desvio_padrao):
+    return (desvio_padrao * DICIONARIO_LOGICO['fator_seguro']).round()
+
+def pertinencia_fuzzy_avancado(cobertura, variabilidade, registros):
+    if registros < DICIONARIO_LOGICO['min_historico']:
+        return '⚪️ Dados Insuficientes'
     if cobertura < DICIONARIO_LOGICO['fuzzy_critico'] and variabilidade > DICIONARIO_LOGICO['variabilidade_alta']:
         return '🔴 Crítico e Instável'
     elif cobertura < DICIONARIO_LOGICO['fuzzy_critico']:
@@ -57,23 +70,25 @@ def pertinencia_fuzzy_avancado(cobertura, variabilidade):
         return '🟢 Ok'
 
 # -------------------- FUNÇÃO DE PEDIDO AUTOMÁTICO --------------------
-def gerar_pedido(lead_time, buffer_percent):
+def gerar_pedido(lead_time):
     consumo = calcular_consumo_medio(inventory_df)
     saldo = calcular_saldo_atual(inventory_df)
     variabilidade = calcular_variabilidade(inventory_df)
+    registros = contar_registros(inventory_df)
 
     pedido_df = pd.DataFrame()
     pedido_df['Consumo Médio Diário'] = consumo
     pedido_df['Estoque Atual'] = saldo
     pedido_df['Variabilidade Consumo'] = variabilidade
+    pedido_df['Qtd Registros'] = registros
     pedido_df['Coeficiente Variação (%)'] = ((variabilidade / consumo) * 100).round(1)
     pedido_df['Estoque Mínimo'] = (pedido_df['Consumo Médio Diário'] * lead_time).round()
-    pedido_df['Buffer Segurança'] = (pedido_df['Estoque Mínimo'] * buffer_percent / 100).round()
-    pedido_df['Ponto de Pedido'] = pedido_df['Estoque Mínimo'] + pedido_df['Buffer Segurança']
+    pedido_df['Buffer Dinâmico'] = calcular_buffer_dinamico(variabilidade)
+    pedido_df['Ponto de Pedido'] = pedido_df['Estoque Mínimo'] + pedido_df['Buffer Dinâmico']
     pedido_df['Cobertura Atual (dias)'] = (pedido_df['Estoque Atual'] / pedido_df['Consumo Médio Diário']).round(1)
 
     # Fuzzy Criticidade Avançada
-    pedido_df['Criticidade'] = pedido_df.apply(lambda row: pertinencia_fuzzy_avancado(row['Cobertura Atual (dias)'], row['Coeficiente Variação (%)']), axis=1)
+    pedido_df['Criticidade'] = pedido_df.apply(lambda row: pertinencia_fuzzy_avancado(row['Cobertura Atual (dias)'], row['Coeficiente Variação (%)'], row['Qtd Registros']), axis=1)
 
     pedido_df = pedido_df.reset_index()
     pedido_df = pd.merge(pedido_df, items_df[['Item ID', 'Name', 'Description']], on='Item ID', how='left')
@@ -85,11 +100,10 @@ menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alert
 
 # -------------------- ABA PEDIDO AUTOMÁTICO --------------------
 if menu == "Pedido Automático de Material":
-    st.header("📄 Pedido Automático de Material com Lógica Fuzzy Avançada")
+    st.header("📄 Pedido Automático de Material com Lógica Fuzzy Refinada")
     lead_time = st.number_input("Lead Time (dias):", min_value=1, value=DICIONARIO_LOGICO['lead_time_padrao'])
-    buffer_percent = st.number_input("Buffer de Segurança (%):", min_value=0, value=DICIONARIO_LOGICO['buffer_percentual_padrao'])
 
-    pedido = gerar_pedido(lead_time, buffer_percent)
+    pedido = gerar_pedido(lead_time)
 
     # Tabelas de pedido para múltiplos períodos
     for dias in DICIONARIO_LOGICO['dias_cobertura']:
@@ -97,7 +111,7 @@ if menu == "Pedido Automático de Material":
         pedido[f'A Pedir {dias} dias'] = pedido.apply(lambda row: max(row[f'Necessidade {dias} dias'] - row['Estoque Atual'], 0), axis=1)
 
     st.subheader("Resumo do Pedido de Material para cada período:")
-    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
+    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Qtd Registros', 'Criticidade'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
 
     csv = pedido.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Baixar Pedido CSV", data=csv, file_name=f'pedido_automatico.csv', mime='text/csv')
@@ -106,15 +120,15 @@ if menu == "Pedido Automático de Material":
 elif menu == "Alertas & Rankings":
     st.header("🚨 Alertas de Estoque e Ranking Fuzzy")
 
-    pedido_alerta = gerar_pedido(DICIONARIO_LOGICO['lead_time_padrao'], DICIONARIO_LOGICO['buffer_percentual_padrao'])
+    pedido_alerta = gerar_pedido(DICIONARIO_LOGICO['lead_time_padrao'])
 
-    st.subheader("Itens com Criticidade Alta ou Instável")
+    st.subheader("Itens com Criticidade Alta, Instável ou Dados Insuficientes")
     criticos = pedido_alerta[pedido_alerta['Criticidade'] != '🟢 Ok']
-    st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade']], use_container_width=True)
+    st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Qtd Registros', 'Criticidade']], use_container_width=True)
 
     st.subheader("Gráfico Quadrante: Cobertura vs Variabilidade")
     fig, ax = plt.subplots()
-    colors = {'🔴 Crítico e Instável': 'red', '🟠 Crítico': 'orange', '🟡 Instável': 'yellow', '🟢 Ok': 'green'}
+    colors = {'🔴 Crítico e Instável': 'red', '🟠 Crítico': 'orange', '🟡 Instável': 'yellow', '⚪️ Dados Insuficientes': 'grey', '🟢 Ok': 'green'}
     for crit, color in colors.items():
         subset = criticos[criticos['Criticidade'] == crit]
         ax.scatter(subset['Cobertura Atual (dias)'], subset['Coeficiente Variação (%)'], label=crit, color=color)
@@ -135,4 +149,4 @@ elif menu == "Alertas & Rankings":
 
 # -------------------- RODAPÉ --------------------
 st.markdown("---")
-st.markdown("**COGEX ALMOXARIFADO - Motor Matemático Fuzzy Avançado | Powered by Streamlit**")
+st.markdown("**COGEX ALMOXARIFADO - Motor Matemático Fuzzy Refinado | Powered by Streamlit**")
