@@ -1,18 +1,23 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import altair as alt
-from datetime import datetime, timedelta
-from io import BytesIO
-import smtplib
-from email.message import EmailMessage
+import plotly.express as px  # Certifique-se de adicionar 'plotly' ao requirements.txt
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
+
 st.title("📦 COGEX ALMOXARIFADO")
-st.markdown("**Sistema Integrado Google Sheets - Pedido de Material com Imagens, Filtros e Preditivos**")
+st.markdown("**Sistema Integrado Google Sheets - Controle Matemático e Visual de Estoque com Lógica Fuzzy Avançada**")
+
+# -------------------- DICIONÁRIO CONFIGURAÇÕES --------------------
+DICIONARIO_LOGICO = {
+    'lead_time_padrao': 7,
+    'buffer_percentual_padrao': 15,
+    'dias_cobertura': [7, 15, 30, 45],
+    'fuzzy_critico': 7,
+    'fuzzy_alerta': 15,
+    'variabilidade_alta': 30  # Coeficiente de variação em %
+}
 
 # -------------------- CARREGAMENTO DE DADOS --------------------
 @st.cache_data(show_spinner="Carregando dados do Google Sheets...")
@@ -27,143 +32,96 @@ def load_data():
 
 items_df, inventory_df = load_data()
 
-# -------------------- PREPARAÇÃO DOS DADOS --------------------
-merged_df = pd.merge(inventory_df, items_df, on='Item ID', how='left')
-merged_df['Ano'] = merged_df['DateTime'].dt.year
-merged_df['Mês'] = merged_df['DateTime'].dt.month
-merged_df['Semana'] = merged_df['DateTime'].dt.isocalendar().week
+# -------------------- FUNÇÕES UTILITÁRIAS --------------------
+def calcular_consumo_medio(inventory):
+    consumo = inventory[inventory['Amount'] < 0].groupby('Item ID')['Amount'].sum().abs()
+    dias = (inventory['DateTime'].max() - inventory['DateTime'].min()).days
+    consumo_medio = consumo / dias
+    return consumo_medio
 
-# -------------------- CONSUMO MÉDIO --------------------
-def consumo_medio(df, dias):
-    data_limite = datetime.now() - timedelta(days=dias)
-    consumo = df[(df['DateTime'] >= data_limite) & (df['Amount'] < 0)]
-    consumo_agrupado = consumo.groupby(['Item ID', 'Name', 'Image'])['Amount'].sum().abs().reset_index()
-    consumo_agrupado.rename(columns={'Amount': f'Consumo Médio {dias} dias'}, inplace=True)
-    return consumo_agrupado
+def calcular_saldo_atual(inventory):
+    saldo = inventory.groupby('Item ID')['Amount'].sum()
+    return saldo
 
-consumo_7 = consumo_medio(merged_df, 7)
-consumo_15 = consumo_medio(merged_df, 15)
-consumo_30 = consumo_medio(merged_df, 30)
-consumo_45 = consumo_medio(merged_df, 45)
+def calcular_variabilidade(inventory):
+    variabilidade = inventory[inventory['Amount'] < 0].groupby('Item ID')['Amount'].std().fillna(0)
+    return variabilidade
 
-consumo_total = consumo_7.merge(consumo_15, on=['Item ID', 'Name', 'Image'], how='outer')\
-                        .merge(consumo_30, on=['Item ID', 'Name', 'Image'], how='outer')\
-                        .merge(consumo_45, on=['Item ID', 'Name', 'Image'], how='outer').fillna(0)
+def pertinencia_fuzzy_avancado(cobertura, variabilidade):
+    if cobertura < DICIONARIO_LOGICO['fuzzy_critico'] and variabilidade > DICIONARIO_LOGICO['variabilidade_alta']:
+        return '🔴 Crítico e Instável'
+    elif cobertura < DICIONARIO_LOGICO['fuzzy_critico']:
+        return '🟠 Crítico'
+    elif variabilidade > DICIONARIO_LOGICO['variabilidade_alta']:
+        return '🟡 Instável'
+    else:
+        return '🟢 Ok'
 
-estoque_atual = inventory_df.groupby('Item ID')['Amount'].sum().reset_index()
-estoque_atual = pd.merge(estoque_atual, items_df[['Item ID', 'Name']], on='Item ID', how='left')
+# -------------------- FUNÇÃO DE PEDIDO AUTOMÁTICO --------------------
+def gerar_pedido(lead_time, buffer_percent):
+    consumo = calcular_consumo_medio(inventory_df)
+    saldo = calcular_saldo_atual(inventory_df)
+    variabilidade = calcular_variabilidade(inventory_df)
 
-pedido_material = pd.merge(consumo_total, estoque_atual, on=['Item ID', 'Name'], how='left')
-pedido_material['Estoque Atual'] = pedido_material['Amount']
-pedido_material.drop(columns=['Amount'], inplace=True)
+    pedido_df = pd.DataFrame()
+    pedido_df['Consumo Médio Diário'] = consumo
+    pedido_df['Estoque Atual'] = saldo
+    pedido_df['Variabilidade Consumo'] = variabilidade
+    pedido_df['Coeficiente Variação (%)'] = ((variabilidade / consumo) * 100).round(1)
+    pedido_df['Estoque Mínimo'] = (pedido_df['Consumo Médio Diário'] * lead_time).round()
+    pedido_df['Buffer Segurança'] = (pedido_df['Estoque Mínimo'] * buffer_percent / 100).round()
+    pedido_df['Ponto de Pedido'] = pedido_df['Estoque Mínimo'] + pedido_df['Buffer Segurança']
+    pedido_df['Cobertura Atual (dias)'] = (pedido_df['Estoque Atual'] / pedido_df['Consumo Médio Diário']).round(1)
 
-pedido_material['Recomendação Pedido'] = np.where(
-    pedido_material['Estoque Atual'] < pedido_material['Consumo Médio 15 dias'],
-    'Pedido Necessário',
-    'OK'
-)
+    # Fuzzy Criticidade Avançada
+    pedido_df['Criticidade'] = pedido_df.apply(lambda row: pertinencia_fuzzy_avancado(row['Cobertura Atual (dias)'], row['Coeficiente Variação (%)']), axis=1)
 
-# -------------------- TABS --------------------
-tabs = st.tabs(["📋 Tabela & Filtros", "🖼️ Detalhes por Produto", "📊 Estatísticas & Alertas", "📥 Pedido Automático Almoxarifado COGEX"])
+    pedido_df = pedido_df.reset_index()
+    pedido_df = pd.merge(pedido_df, items_df[['Item ID', 'Name', 'Description']], on='Item ID', how='left')
 
-with tabs[0]:
-    st.header("📊 Controle e Consumo Médio por Produto")
+    return pedido_df
 
-    st.dataframe(pedido_material)
+# -------------------- INTERFACE STREAMLIT --------------------
+menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alertas & Rankings"])
 
-    st.subheader("📈 Gráfico - Consumo Médio (15 dias)")
-    chart = alt.Chart(pedido_material).mark_bar().encode(
-        x=alt.X('Name:N', sort='-y'),
-        y='Consumo Médio 15 dias:Q',
-        color=alt.Color('Recomendação Pedido:N', scale=alt.Scale(domain=['Pedido Necessário', 'OK'], range=['red', 'green'])),
-        tooltip=['Name', 'Estoque Atual', 'Consumo Médio 7 dias', 'Consumo Médio 15 dias', 'Consumo Médio 30 dias', 'Recomendação Pedido']
-    ).properties(width=900, height=400)
+# -------------------- ABA PEDIDO AUTOMÁTICO --------------------
+if menu == "Pedido Automático de Material":
+    st.header("📄 Pedido Automático de Material com Lógica Fuzzy Avançada")
+    lead_time = st.number_input("Lead Time (dias):", min_value=1, value=DICIONARIO_LOGICO['lead_time_padrao'])
+    buffer_percent = st.number_input("Buffer de Segurança (%):", min_value=0, value=DICIONARIO_LOGICO['buffer_percentual_padrao'])
 
-    st.altair_chart(chart)
+    pedido = gerar_pedido(lead_time, buffer_percent)
 
-    st.subheader("🏆 Ranking - Itens Mais Consumidos (Últimos 30 dias)")
-    ranking_30 = consumo_30.sort_values(by='Consumo Médio 30 dias', ascending=False)
-    st.table(ranking_30[['Name', 'Consumo Médio 30 dias']])
+    # Tabelas de pedido para múltiplos períodos
+    for dias in DICIONARIO_LOGICO['dias_cobertura']:
+        pedido[f'Necessidade {dias} dias'] = (pedido['Consumo Médio Diário'] * dias).round()
+        pedido[f'A Pedir {dias} dias'] = pedido.apply(lambda row: max(row[f'Necessidade {dias} dias'] - row['Estoque Atual'], 0), axis=1)
 
-    st.download_button(
-        label="📥 Baixar Relatório Pedido (CSV)",
-        data=pedido_material.to_csv(index=False).encode('utf-8'),
-        file_name='pedido_material_cogex.csv',
-        mime='text/csv'
-    )
+    st.subheader("Resumo do Pedido de Material para cada período:")
+    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
 
-with tabs[1]:
-    st.header("📦 Detalhes do Produto Selecionado")
-    produto_selecionado = st.selectbox("Selecione um Produto:", options=pedido_material['Name'].unique())
-    produto_info = pedido_material[pedido_material['Name'] == produto_selecionado].iloc[0]
+    csv = pedido.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Baixar Pedido CSV", data=csv, file_name=f'pedido_automatico.csv', mime='text/csv')
 
-    st.image(produto_info['Image'], caption=produto_info['Name'], use_container_width=True)
-    st.markdown(f"**ID:** {produto_info['Item ID']}")
-    st.markdown(f"**Estoque Atual:** {produto_info['Estoque Atual']}")
-    st.markdown(f"**Consumo Médio 7 dias:** {produto_info['Consumo Médio 7 dias']}")
-    st.markdown(f"**Consumo Médio 15 dias:** {produto_info['Consumo Médio 15 dias']}")
-    st.markdown(f"**Consumo Médio 30 dias:** {produto_info['Consumo Médio 30 dias']}")
-    st.markdown(f"**Consumo Médio 45 dias:** {produto_info['Consumo Médio 45 dias']}")
-    st.markdown(f"**Status de Pedido:** {produto_info['Recomendação Pedido']}")
+# -------------------- ABA ALERTAS & RANKINGS --------------------
+elif menu == "Alertas & Rankings":
+    st.header("🚨 Alertas de Estoque e Ranking Fuzzy")
 
-with tabs[2]:
-    st.header("📊 Estatísticas & Alertas Gerais")
+    pedido_alerta = gerar_pedido(DICIONARIO_LOGICO['lead_time_padrao'], DICIONARIO_LOGICO['buffer_percentual_padrao'])
 
-    total_produtos = pedido_material['Item ID'].nunique()
-    produtos_com_pedido = pedido_material[pedido_material['Recomendação Pedido'] == 'Pedido Necessário']['Item ID'].nunique()
+    st.subheader("Itens com Criticidade Alta ou Instável")
+    criticos = pedido_alerta[pedido_alerta['Criticidade'] != '🟢 Ok']
+    st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade']], use_container_width=True)
 
-    st.metric("Total de Produtos", total_produtos)
-    st.metric("Produtos com Pedido Necessário", produtos_com_pedido)
+    st.subheader("Gráfico Quadrante: Cobertura vs Variabilidade")
+    fig = px.scatter(criticos, x='Cobertura Atual (dias)', y='Coeficiente Variação (%)', color='Criticidade', hover_data=['Name'], title='Cobertura x Variabilidade')
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("🔔 Produtos com Estoque Baixo")
-    alerta_baixo = pedido_material[pedido_material['Recomendação Pedido'] == 'Pedido Necessário']
-    st.dataframe(alerta_baixo[['Item ID', 'Name', 'Estoque Atual', 'Consumo Médio 15 dias']])
+    st.subheader("Ranking de Consumo (Top 10)")
+    ranking = pedido_alerta.sort_values(by='Consumo Médio Diário', ascending=False).head(10)
+    fig = px.bar(ranking, x='Name', y='Consumo Médio Diário', color='Criticidade', title='Top 10 Consumo Médio Diário')
+    st.plotly_chart(fig, use_container_width=True)
 
-with tabs[3]:
-    st.header("📥 PEDIDO DE MATERIAL AUTOMÁTICO ALMOXARIFADO DA COGEX")
-
-    pedido_auto = pedido_material.copy()
-    pedido_auto['Pedido 7 dias'] = pedido_auto['Consumo Médio 7 dias'] - pedido_auto['Estoque Atual']
-    pedido_auto['Pedido 15 dias'] = pedido_auto['Consumo Médio 15 dias'] - pedido_auto['Estoque Atual']
-    pedido_auto['Pedido 30 dias'] = pedido_auto['Consumo Médio 30 dias'] - pedido_auto['Estoque Atual']
-    pedido_auto['Pedido 45 dias'] = pedido_auto['Consumo Médio 45 dias'] - pedido_auto['Estoque Atual']
-
-    pedido_auto[pedido_auto.columns[-4:]] = pedido_auto[pedido_auto.columns[-4:]].applymap(lambda x: max(x,0))
-
-    st.dataframe(pedido_auto[['Item ID', 'Name', 'Estoque Atual', 'Pedido 7 dias', 'Pedido 15 dias', 'Pedido 30 dias', 'Pedido 45 dias']])
-
-    # Gerar arquivo XLS em memória
-    output = BytesIO()
-    pedido_auto.to_excel(output, index=False, sheet_name='Pedido_COGEX', engine='openpyxl')
-    xls_data = output.getvalue()
-
-    st.download_button(
-        label="📥 Baixar Pedido Automático (XLS)",
-        data=xls_data,
-        file_name='pedido_material_automatico_cogex.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
-
-    # ENVIO EMAIL AUTOMÁTICO
-    st.subheader("📤 Enviar Pedido por E-mail")
-    if st.button("Enviar Pedido para coordadmincogex@tjma.jus.br"):
-        try:
-            msg = EmailMessage()
-            msg['Subject'] = 'Pedido de Material Automático - Almoxarifado COGEX'
-            msg['From'] = 'seu_email@gmail.com'
-            msg['To'] = 'coordadmincogex@tjma.jus.br'
-            msg.set_content('Segue em anexo o Pedido Automático de Material gerado pelo sistema.')
-
-            msg.add_attachment(xls_data, maintype='application', subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename='pedido_material_automatico_cogex.xlsx')
-
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-                smtp.login('seu_email@gmail.com', 'sua_senha')
-                smtp.send_message(msg)
-
-            st.success("Pedido enviado com sucesso para coordadmincogex@tjma.jus.br!")
-        except Exception as e:
-            st.error(f"Erro ao enviar e-mail: {e}")
-
-# -------------------- ALERTAS AUTOMÁTICOS SIDEBAR --------------------
-if not pedido_material[pedido_material['Recomendação Pedido'] == 'Pedido Necessário'].empty:
-    st.sidebar.warning(f"⚠️ {len(pedido_material[pedido_material['Recomendação Pedido'] == 'Pedido Necessário'])} produtos com necessidade de pedido!")
+# -------------------- RODAPÉ --------------------
+st.markdown("---")
+st.markdown("**COGEX ALMOXARIFADO - Motor Matemático Fuzzy Avançado | Powered by Streamlit**")
