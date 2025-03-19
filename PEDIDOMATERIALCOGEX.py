@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# Função para carregar dados (exemplo via CSV público, pode adaptar para seu Google Sheet)
+# Função para carregar dados
 @st.cache_data
 def carregar_dados():
     items_url = 'https://docs.google.com/spreadsheets/d/1NLLZoIxIZ2u-liHGKM5P8WNXdu3ycCoUUiD3f0FsR84/export?format=csv&gid=0'
@@ -14,18 +14,17 @@ def carregar_dados():
 
 # Função para cálculo do estoque
 def calcular_estoque(items_df, inventory_df, data_pedido):
-    # Ajuste IDs
+    # Ajustar IDs
     items_df['Item ID'] = items_df['Item ID'].str.strip()
     inventory_df['Item ID'] = inventory_df['Item ID'].str.strip()
 
-    # Período pré-definido até 02/02
+    # Filtrar período: Novembro até 02/02, ignorando 12/02 reconferência
     inicio_periodo = pd.to_datetime('2019-11-01')
     fim_periodo = pd.to_datetime('2020-02-02')
 
-    if data_pedido <= datetime(2020, 2, 2):
-        inventory_periodo = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) & (inventory_df['DateTime'] <= fim_periodo)]
-    else:
-        inventory_periodo = inventory_df
+    inventory_periodo = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) &
+                                     (inventory_df['DateTime'] <= fim_periodo) &
+                                     (inventory_df['DateTime'].dt.strftime('%Y-%m-%d') != '2020-02-12')].copy()
 
     # Estoque Atual
     estoque_atual = inventory_periodo.groupby('Item ID')['Amount'].sum().reset_index()
@@ -43,12 +42,18 @@ def calcular_estoque(items_df, inventory_df, data_pedido):
     resultado = pd.merge(estoque_atual, consumo_medio, on='Item ID', how='left')
     resultado['Consumo Médio Diário'].fillna(0, inplace=True)
 
+    # Associar Nome Produto
+    nome_map = dict(zip(items_df['Item ID'], items_df['Name']))
+    resultado['Nome Produto'] = resultado['Item ID'].map(nome_map)
+
     # Calcular necessidades
     for dias in [7, 15, 30, 45]:
         resultado[f'Necessidade {dias} dias'] = resultado['Consumo Médio Diário'] * dias
+
+    # Estoque Mínimo baseado no consumo de 30 dias
     resultado['Estoque Mínimo'] = resultado['Consumo Médio Diário'] * 30 * 0.5
 
-    # Status
+    # Status dos produtos
     def definir_status(row):
         if (row['Estoque Atual'] - row['Necessidade 15 dias']) < row['Estoque Mínimo']:
             return 'Vermelho - Alerta Crítico'
@@ -57,11 +62,7 @@ def calcular_estoque(items_df, inventory_df, data_pedido):
         else:
             return 'Verde - OK'
 
-    resultado['Status'] = resultado.apply(definir_status, axis=1)
-    
-    # Mapear nomes
-    nome_map = dict(zip(items_df['Item ID'], items_df['Name']))
-    resultado['Nome Produto'] = resultado['Item ID'].map(nome_map)
+    resultado['Status até 02/02'] = resultado.apply(definir_status, axis=1)
 
     return resultado
 
@@ -87,7 +88,7 @@ status_tabs = st.tabs(["🔴 Crítico", "🟡 Médio", "🟢 OK"])
 # Separar por status
 for idx, status in enumerate(['Vermelho - Alerta Crítico', 'Amarelo - Alerta Médio', 'Verde - OK']):
     with status_tabs[idx]:
-        st.dataframe(resultado[resultado['Status'] == status][['Item ID', 'Nome Produto', 'Estoque Atual', f'Necessidade {periodo} dias', 'Estoque Mínimo', 'Status']])
+        st.dataframe(resultado[resultado['Status até 02/02'] == status][['Item ID', 'Nome Produto', 'Estoque Atual', f'Necessidade {periodo} dias', 'Estoque Mínimo', 'Status até 02/02']])
 
 # Gerar arquivo
 st.subheader("📄 Gerar Pedido de Material")
