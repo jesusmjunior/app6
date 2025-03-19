@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from fpdf import FPDF
 import matplotlib.pyplot as plt
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
@@ -67,19 +66,6 @@ def gerar_pedido(data_proximo_pedido, intervalo_novo_pedido):
 
     return pedido_df
 
-# -------------------- FUNÇÃO PARA PDF --------------------
-def gerar_pdf(df, data_pedido):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, f"PEDIDO DE MATERIAL PARA 7, 15, 30 E 45 DIAS - {data_pedido}", ln=True, align='C')
-    pdf.set_font("Arial", size=10)
-
-    for index, row in df.iterrows():
-        pdf.cell(0, 8, f"{row['Item ID']} - {row['Name']} - Status: {row['Status']} | Min: {row['Estoque Necessário até Pedido']} | 7d: {row['A Pedir 7 dias']} | 15d: {row['A Pedir 15 dias']} | 30d: {row['A Pedir 30 dias']} | 45d: {row['A Pedir 45 dias']}", ln=True)
-
-    return pdf.output(dest='S').encode('latin-1')
-
 # -------------------- INTERFACE STREAMLIT --------------------
 menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alertas & Rankings", "Histórico & Análise"])
 
@@ -94,10 +80,7 @@ if menu == "Pedido Automático de Material":
     st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Consumo Médio Diário', 'Dias até Pedido', 'Estoque Necessário até Pedido', 'Faltante Até Pedido', 'Status'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
 
     csv = pedido.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Pedido CSV", data=csv, file_name=f'pedido_automatico.csv', mime='text/csv')
-
-    pdf = gerar_pdf(pedido, data_proximo_pedido)
-    st.download_button("📥 Baixar Pedido PDF", data=pdf, file_name=f'pedido_automatico.pdf', mime='application/pdf')
+    st.download_button("📥 Baixar Pedido XLS", data=csv, file_name=f'COGEX_ALMOXARIFADO_PEDIDO_MATERIAL.csv', mime='text/csv')
 
     st.subheader("📊 Gráficos Estoque por Status")
 
