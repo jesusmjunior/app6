@@ -6,8 +6,6 @@ import numpy as np
 import altair as alt
 from datetime import datetime, timedelta
 from io import BytesIO
-import smtplib
-from email.message import EmailMessage
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
@@ -68,12 +66,12 @@ pedido_material['Recomendação Pedido'] = np.where(
 )
 
 # -------------------- TABS --------------------
-tabs = st.tabs(["📋 Tabela & Filtros", "🖼️ Detalhes por Produto", "📊 Estatísticas & Alertas", "📥 Pedido Automático Almoxarifado COGEX"])
+tabs = st.tabs(["📋 Tabela & Filtros", "🖼️ Detalhes por Produto", "📊 Estatísticas & Alertas", "📥 Pedido Automático COGEX"])
 
 with tabs[0]:
     st.header("📊 Controle e Consumo Médio por Produto")
 
-    st.dataframe(pedido_material)
+    st.dataframe(pedido_material[['Item ID', 'Name', 'Estoque Atual', 'Consumo Médio 7 dias', 'Consumo Médio 15 dias', 'Consumo Médio 30 dias', 'Consumo Médio 45 dias', 'Recomendação Pedido']])
 
     st.subheader("📈 Gráfico - Consumo Médio (15 dias)")
     chart = alt.Chart(pedido_material).mark_bar().encode(
@@ -89,13 +87,6 @@ with tabs[0]:
     ranking_30 = consumo_30.sort_values(by='Consumo Médio 30 dias', ascending=False)
     st.table(ranking_30[['Name', 'Consumo Médio 30 dias']])
 
-    st.download_button(
-        label="📥 Baixar Relatório Pedido (CSV)",
-        data=pedido_material.to_csv(index=False).encode('utf-8'),
-        file_name='pedido_material_cogex.csv',
-        mime='text/csv'
-    )
-
 with tabs[1]:
     st.header("📦 Detalhes do Produto Selecionado")
     produto_selecionado = st.selectbox("Selecione um Produto:", options=pedido_material['Name'].unique())
@@ -109,3 +100,39 @@ with tabs[1]:
     st.markdown(f"**Consumo Médio 30 dias:** {produto_info['Consumo Médio 30 dias']}")
     st.markdown(f"**Consumo Médio 45 dias:** {produto_info['Consumo Médio 45 dias']}")
     st.markdown(f"**Status de Pedido:** {produto_info['Recomendação Pedido']}")
+
+with tabs[2]:
+    st.header("📊 Estatísticas & Alertas Gerais")
+    total_produtos = pedido_material['Item ID'].nunique()
+    produtos_com_pedido = pedido_material[pedido_material['Recomendação Pedido'] == 'Pedido Necessário']['Item ID'].nunique()
+
+    st.metric("Total de Produtos", total_produtos)
+    st.metric("Produtos com Pedido Necessário", produtos_com_pedido)
+
+    st.subheader("🔔 Produtos com Estoque Baixo")
+    alerta_baixo = pedido_material[pedido_material['Recomendação Pedido'] == 'Pedido Necessário']
+    st.dataframe(alerta_baixo[['Item ID', 'Name', 'Estoque Atual', 'Consumo Médio 15 dias']])
+
+with tabs[3]:
+    st.header("📥 Pedido Automático Almoxarifado COGEX")
+
+    pedido_auto = pedido_material.copy()
+    pedido_auto['Pedido 7 dias'] = pedido_auto['Consumo Médio 7 dias'] - pedido_auto['Estoque Atual']
+    pedido_auto['Pedido 15 dias'] = pedido_auto['Consumo Médio 15 dias'] - pedido_auto['Estoque Atual']
+    pedido_auto['Pedido 30 dias'] = pedido_auto['Consumo Médio 30 dias'] - pedido_auto['Estoque Atual']
+    pedido_auto['Pedido 45 dias'] = pedido_auto['Consumo Médio 45 dias'] - pedido_auto['Estoque Atual']
+
+    pedido_auto[pedido_auto.columns[-4:]] = pedido_auto[pedido_auto.columns[-4:]].applymap(lambda x: max(x,0))
+
+    st.dataframe(pedido_auto[['Item ID', 'Name', 'Estoque Atual', 'Pedido 7 dias', 'Pedido 15 dias', 'Pedido 30 dias', 'Pedido 45 dias']])
+
+    excel_output = BytesIO()
+    pedido_auto.to_excel(excel_output, index=False, sheet_name='Pedido_COGEX', engine='openpyxl')
+    xls_data = excel_output.getvalue()
+
+    st.download_button(
+        label="📥 Baixar Pedido Automático (XLS)",
+        data=xls_data,
+        file_name='pedido_material_automatico_cogex.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
