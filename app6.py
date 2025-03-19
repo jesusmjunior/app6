@@ -94,7 +94,8 @@ with tabs[1]:
     produto_selecionado = st.selectbox("Selecione um Produto:", options=pedido_material['Name'].unique())
     produto_info = pedido_material[pedido_material['Name'] == produto_selecionado].iloc[0]
 
-    st.image(produto_info['Image'], caption=produto_info['Name'], use_column_width=True)
+    # Corrigindo de use_column_width para use_container_width
+    st.image(produto_info['Image'], caption=produto_info['Name'], use_container_width=True)
     st.markdown(f"**Estoque Atual:** {produto_info['Estoque Atual']}")
     st.markdown(f"**Consumo Médio 7 dias:** {produto_info['Consumo Médio 7 dias']}")
     st.markdown(f"**Consumo Médio 15 dias:** {produto_info['Consumo Médio 15 dias']}")
