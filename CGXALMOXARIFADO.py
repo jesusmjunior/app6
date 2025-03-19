@@ -6,7 +6,6 @@ import numpy as np
 import altair as alt
 from datetime import datetime, timedelta
 from io import BytesIO
-from openpyxl import Workbook
 import smtplib
 from email.message import EmailMessage
 
