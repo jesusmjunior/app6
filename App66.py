@@ -6,7 +6,7 @@ import numpy as np
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
 
 st.title("📦 COGEX ALMOXARIFADO")
-st.markdown("**Sistema Local - Controle Matemático e Visual de Estoque com Lógica Fuzzy Avançada**")
+st.markdown("**Sistema Web - Controle Matemático e Visual de Estoque com Lógica Fuzzy Avançada**")
 
 # -------------------- DICIONÁRIO CONFIGURAÇÕES --------------------
 DICIONARIO_LOGICO = {
@@ -20,12 +20,15 @@ DICIONARIO_LOGICO = {
     'min_historico': 5
 }
 
-# -------------------- CARREGAMENTO DE DADOS --------------------
-@st.cache_data(show_spinner="Carregando dados locais...")
+# -------------------- CARREGAMENTO DE DADOS ONLINE --------------------
+@st.cache_data(show_spinner="Carregando dados do Google Sheets...")
 def load_data():
-    inventory = pd.read_excel('Items.xlsx', sheet_name='Inventory')
+    url_inventory = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?gid=1710164548&single=true&output=csv'
+    url_items = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?gid=1011017078&single=true&output=csv'
+    
+    inventory = pd.read_csv(url_inventory)
     inventory['DateTime'] = pd.to_datetime(inventory['DateTime'], errors='coerce')
-    items = pd.read_excel('Items.xlsx', sheet_name='Items')
+    items = pd.read_csv(url_items)
     return items, inventory
 
 items_df, inventory_df = load_data()
@@ -95,15 +98,16 @@ menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alert
 if menu == "Pedido Automático de Material":
     st.header("📄 Pedido Automático de Material com Lógica Fuzzy Refinada")
     lead_time = st.number_input("Lead Time (dias):", min_value=1, value=DICIONARIO_LOGICO['lead_time_padrao'])
+    periodo_personalizado = st.number_input("Período Personalizado de Análise (dias):", min_value=1, value=10)
 
     pedido = gerar_pedido(lead_time)
 
-    for dias in DICIONARIO_LOGICO['dias_cobertura']:
+    for dias in DICIONARIO_LOGICO['dias_cobertura'] + [periodo_personalizado]:
         pedido[f'Necessidade {dias} dias'] = (pedido['Consumo Médio Diário'] * dias).round()
         pedido[f'A Pedir {dias} dias'] = pedido.apply(lambda row: max(row[f'Necessidade {dias} dias'] - row['Estoque Atual'], 0), axis=1)
 
     st.subheader("Resumo do Pedido de Material para cada período:")
-    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Qtd Registros', 'Criticidade'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
+    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Qtd Registros', 'Criticidade'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura'] + [periodo_personalizado]]], use_container_width=True)
 
     csv = pedido.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Baixar Pedido CSV", data=csv, file_name=f'pedido_automatico.csv', mime='text/csv')
