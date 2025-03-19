@@ -6,7 +6,6 @@ import numpy as np
 import altair as alt
 from datetime import datetime, timedelta
 from io import BytesIO
-from openpyxl import Workbook
 import smtplib
 from email.message import EmailMessage
 
@@ -89,23 +88,14 @@ with tabs[3]:
     coluna_pedido = f'Pedido {dias_opcao}'
     pedido_exportar = pedido_auto[['Item ID', 'Name', 'Estoque Atual', coluna_pedido]].rename(columns={coluna_pedido: 'Quantidade Pedido'})
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Pedido_COGEX"
-
-    ws.append(["CORREGEDORIA DO FORO EXTRAJUDICIAL"])
-    ws.append(["PEDIDO DE MATERIAL AUTOMÁTICO COGEX-MA"])
-    ws.append([])
-    ws.append(["Item ID", "Name", "Estoque Atual", "Quantidade Pedido"])
-
-    for row in pedido_exportar.itertuples(index=False):
-        ws.append(row)
-
-    ws.append([])
-    ws.append(["Corregedoria Geral do Foro Extrajudicial - Rua Cumã, nº 300, 1º andar, Edifício Manhattan Center III, Jardim Renascença 2 - São Luís - Maranhão CEP 65.075-700"])
-
+    # GERAÇÃO XLS MINIMALISTA VIA PANDAS + XlsxWriter
     excel_output = BytesIO()
-    wb.save(excel_output)
+    with pd.ExcelWriter(excel_output, engine='xlsxwriter') as writer:
+        pedido_exportar.to_excel(writer, index=False, sheet_name='Pedido_COGEX')
+        worksheet = writer.sheets['Pedido_COGEX']
+        worksheet.write('F1', 'CORREGEDORIA DO FORO EXTRAJUDICIAL')
+        worksheet.write('F2', 'PEDIDO DE MATERIAL AUTOMÁTICO COGEX-MA')
+        worksheet.write('F4', 'Corregedoria Geral do Foro Extrajudicial - Rua Cumã, nº 300, 1º andar, Edifício Manhattan Center III, Jardim Renascença 2 - São Luís - Maranhão CEP 65.075-700')
 
     st.download_button(
         label="📥 Baixar Pedido Exportado (XLS)",
