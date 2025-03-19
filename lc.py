@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from io import StringIO
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
@@ -95,11 +93,7 @@ if menu == "Pedido Automático de Material":
         subset = pedido[pedido['Status'] == status]
         if not subset.empty:
             st.subheader(f"{status} - {len(subset)} produtos")
-            fig, ax = plt.subplots(figsize=(10,5))
-            subset.plot(kind='bar', x='Name', y='Estoque Atual', color=cor, ax=ax)
-            plt.xticks(rotation=90)
-            plt.title(f'Produtos {status}')
-            st.pyplot(fig)
+            st.bar_chart(subset.set_index('Name')['Estoque Atual'])
 
 elif menu == "Alertas & Rankings":
     st.header("🚨 Itens Críticos, Alerta ou Ok")
@@ -129,11 +123,7 @@ elif menu == "Histórico & Análise":
     entradas_saidas = inventory_df.copy()
     entradas_saidas['Mês/Ano'] = entradas_saidas['DateTime'].dt.to_period('M')
     entradas_saidas = entradas_saidas.groupby(['Mês/Ano'])['Amount'].sum().reset_index()
-    fig, ax = plt.subplots()
-    ax.bar(entradas_saidas['Mês/Ano'].astype(str), entradas_saidas['Amount'])
-    plt.xticks(rotation=90)
-    plt.title('Saldo Mensal de Movimentação')
-    st.pyplot(fig)
+    st.bar_chart(entradas_saidas.set_index('Mês/Ano')['Amount'])
 
 # -------------------- RODAPÉ --------------------
 st.markdown("---")
