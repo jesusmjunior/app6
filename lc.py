@@ -1,22 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import matplotlib.pyplot as plt
+from io import StringIO
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
 
 st.title("📦 COGEX ALMOXARIFADO")
-st.markdown("**Sistema Integrado Google Sheets - Controle Matemático e Visual de Estoque com Lógica Fuzzy Avançada**")
+st.markdown("**Sistema Web - Controle Matemático de Estoque - Pedido Automatizado com Critérios Reais**")
 
-# -------------------- DICIONÁRIO CONFIGURAÇÕES --------------------
+# -------------------- CONFIGURAÇÕES --------------------
 DICIONARIO_LOGICO = {
-    'lead_time_padrao': 7,
-    'buffer_percentual_padrao': 15,
     'dias_cobertura': [7, 15, 30, 45],
-    'fuzzy_critico': 7,
-    'fuzzy_alerta': 15,
-    'variabilidade_alta': 30  # Coeficiente de variação em %
+    'critico_limite': 0,
+    'alerta_limite': 1
 }
 
 # -------------------- CARREGAMENTO DE DADOS --------------------
@@ -32,7 +30,7 @@ def load_data():
 
 items_df, inventory_df = load_data()
 
-# -------------------- FUNÇÕES UTILITÁRIAS --------------------
+# -------------------- FUNÇÕES MATEMÁTICAS --------------------
 def calcular_consumo_medio(inventory):
     consumo = inventory[inventory['Amount'] < 0].groupby('Item ID')['Amount'].sum().abs()
     dias = (inventory['DateTime'].max() - inventory['DateTime'].min()).days
@@ -43,84 +41,100 @@ def calcular_saldo_atual(inventory):
     saldo = inventory.groupby('Item ID')['Amount'].sum()
     return saldo
 
-def calcular_variabilidade(inventory):
-    variabilidade = inventory[inventory['Amount'] < 0].groupby('Item ID')['Amount'].std().fillna(0)
-    return variabilidade
-
-def pertinencia_fuzzy_avancado(cobertura, variabilidade):
-    if cobertura < DICIONARIO_LOGICO['fuzzy_critico'] and variabilidade > DICIONARIO_LOGICO['variabilidade_alta']:
-        return 'Crítico e Instável'
-    elif cobertura < DICIONARIO_LOGICO['fuzzy_critico']:
-        return 'Crítico'
-    elif variabilidade > DICIONARIO_LOGICO['variabilidade_alta']:
-        return 'Instável'
-    else:
-        return 'Ok'
-
-# -------------------- FUNÇÃO DE PEDIDO AUTOMÁTICO --------------------
-def gerar_pedido(lead_time, buffer_percent):
-    consumo = calcular_consumo_medio(inventory_df)
+def gerar_pedido(data_proximo_pedido, intervalo_novo_pedido):
+    consumo_medio = calcular_consumo_medio(inventory_df)
     saldo = calcular_saldo_atual(inventory_df)
-    variabilidade = calcular_variabilidade(inventory_df)
 
-    pedido_df = pd.DataFrame()
-    pedido_df['Consumo Médio Diário'] = consumo
-    pedido_df['Estoque Atual'] = saldo
-    pedido_df['Variabilidade Consumo'] = variabilidade
-    pedido_df['Coeficiente Variação (%)'] = ((variabilidade / consumo) * 100).round(1)
-    pedido_df['Estoque Mínimo'] = (pedido_df['Consumo Médio Diário'] * lead_time).round()
-    pedido_df['Buffer Segurança'] = (pedido_df['Estoque Mínimo'] * buffer_percent / 100).round()
-    pedido_df['Ponto de Pedido'] = pedido_df['Estoque Mínimo'] + pedido_df['Buffer Segurança']
-    pedido_df['Cobertura Atual (dias)'] = (pedido_df['Estoque Atual'] / pedido_df['Consumo Médio Diário']).round(1)
+    pedido_df = pd.merge(items_df[['Item ID', 'Name', 'Description']], saldo.reset_index(), on='Item ID', how='left')
+    pedido_df = pd.merge(pedido_df, consumo_medio.reset_index(), on='Item ID', how='left', suffixes=('_Estoque', '_Consumo'))
 
-    # Fuzzy Criticidade Avançada
-    pedido_df['Criticidade'] = pedido_df.apply(lambda row: pertinencia_fuzzy_avancado(row['Cobertura Atual (dias)'], row['Coeficiente Variação (%)']), axis=1)
+    pedido_df = pedido_df.fillna({'Amount_Estoque': 0, 'Amount_Consumo': 0})
 
-    pedido_df = pedido_df.reset_index()
-    pedido_df = pd.merge(pedido_df, items_df[['Item ID', 'Name', 'Description', 'Image']], on='Item ID', how='left')
+    dias_ate_pedido = (pd.to_datetime(data_proximo_pedido) - pd.to_datetime('today')).days
+
+    pedido_df['Consumo Médio Diário'] = pedido_df['Amount_Consumo']
+    pedido_df['Estoque Atual'] = pedido_df['Amount_Estoque']
+    pedido_df['Dias até Pedido'] = dias_ate_pedido
+
+    for dias in DICIONARIO_LOGICO['dias_cobertura']:
+        pedido_df[f'Necessidade {dias} dias'] = (pedido_df['Consumo Médio Diário'] * dias).round()
+        pedido_df[f'A Pedir {dias} dias'] = pedido_df.apply(lambda row: max(row[f'Necessidade {dias} dias'] - row['Estoque Atual'], 0), axis=1)
+
+    pedido_df['Estoque Necessário até Pedido'] = (pedido_df['Consumo Médio Diário'] * dias_ate_pedido).round()
+    pedido_df['Faltante Até Pedido'] = pedido_df['Estoque Necessário até Pedido'] - pedido_df['Estoque Atual']
+
+    pedido_df['Status'] = pedido_df.apply(lambda row: '🔴 Crítico' if row['Estoque Atual'] <= DICIONARIO_LOGICO['critico_limite'] or row['Estoque Atual'] < row['Estoque Necessário até Pedido'] else ('🟡 Alerta' if row['Estoque Atual'] < row['Consumo Médio Diário'] * 15 else '🟢 Ok'), axis=1)
+
     return pedido_df
 
+# -------------------- FUNÇÃO PARA EXPORTAÇÃO CSV --------------------
+def exportar_csv(df):
+    csv = df.to_csv(index=False)
+    return csv.encode('utf-8')
+
 # -------------------- INTERFACE STREAMLIT --------------------
-menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alertas & Rankings"])
+menu = st.sidebar.selectbox("Navegar", ["Pedido Automático de Material", "Alertas & Rankings", "Histórico & Análise"])
 
-# -------------------- ABA PEDIDO AUTOMÁTICO --------------------
 if menu == "Pedido Automático de Material":
-    st.header("📄 Pedido Automático de Material com Lógica Fuzzy Avançada")
-    lead_time = st.number_input("Lead Time (dias):", min_value=1, value=DICIONARIO_LOGICO['lead_time_padrao'])
-    buffer_percent = st.number_input("Buffer de Segurança (%):", min_value=0, value=DICIONARIO_LOGICO['buffer_percentual_padrao'])
+    st.header("📄 PEDIDO DE MATERIAL PARA 7, 15, 30 E 45 DIAS")
+    data_proximo_pedido = st.date_input("Data do Próximo Pedido")
+    intervalo_novo_pedido = st.number_input("Intervalo entre Pedidos (dias):", min_value=1, value=15)
 
-    pedido = gerar_pedido(lead_time, buffer_percent)
-
-    # Tabelas de pedido para múltiplos períodos
-    for dias in DICIONARIO_LOGICO['dias_cobertura']:
-        pedido[f'Necessidade {dias} dias'] = (pedido['Consumo Médio Diário'] * dias).round()
-        pedido[f'A Pedir {dias} dias'] = pedido.apply(lambda row: max(row[f'Necessidade {dias} dias'] - row['Estoque Atual'], 0), axis=1)
+    pedido = gerar_pedido(data_proximo_pedido, intervalo_novo_pedido)
 
     st.subheader("Resumo do Pedido de Material para cada período:")
-    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
+    st.dataframe(pedido[['Item ID', 'Name', 'Estoque Atual', 'Consumo Médio Diário', 'Dias até Pedido', 'Estoque Necessário até Pedido', 'Faltante Até Pedido', 'Status'] + [f'A Pedir {dias} dias' for dias in DICIONARIO_LOGICO['dias_cobertura']]], use_container_width=True)
 
-    csv = pedido.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Pedido CSV", data=csv, file_name=f'pedido_automatico.csv', mime='text/csv')
+    csv = exportar_csv(pedido)
+    st.download_button("📥 Baixar Pedido CSV", data=csv, file_name='COGEX_ALMOXARIFADO_PEDIDO_MATERIAL.csv', mime='text/csv')
 
-# -------------------- ABA ALERTAS & RANKINGS --------------------
+    st.subheader("📊 Gráficos Estoque por Status")
+
+    status_cores = {'🔴 Crítico': 'red', '🟡 Alerta': 'orange', '🟢 Ok': 'green'}
+    for status, cor in status_cores.items():
+        subset = pedido[pedido['Status'] == status]
+        if not subset.empty:
+            st.subheader(f"{status} - {len(subset)} produtos")
+            fig, ax = plt.subplots(figsize=(10,5))
+            subset.plot(kind='bar', x='Name', y='Estoque Atual', color=cor, ax=ax)
+            plt.xticks(rotation=90)
+            plt.title(f'Produtos {status}')
+            st.pyplot(fig)
+
 elif menu == "Alertas & Rankings":
-    st.header("🚨 Alertas de Estoque e Ranking Fuzzy")
+    st.header("🚨 Itens Críticos, Alerta ou Ok")
 
-    pedido_alerta = gerar_pedido(DICIONARIO_LOGICO['lead_time_padrao'], DICIONARIO_LOGICO['buffer_percentual_padrao'])
+    data_proximo_pedido = pd.to_datetime('today') + pd.Timedelta(days=15)
+    pedido_alerta = gerar_pedido(data_proximo_pedido, 15)
 
-    st.subheader("Itens com Criticidade Alta ou Instável")
-    criticos = pedido_alerta[pedido_alerta['Criticidade'] != 'Ok']
-    st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Cobertura Atual (dias)', 'Coeficiente Variação (%)', 'Criticidade']], use_container_width=True)
-
-    st.subheader("Gráfico Quadrante: Cobertura vs Variabilidade")
-    fig = px.scatter(criticos, x='Cobertura Atual (dias)', y='Coeficiente Variação (%)', color='Criticidade', hover_data=['Name'], title='Cobertura x Variabilidade')
-    st.plotly_chart(fig, use_container_width=True)
+    st.subheader("Itens com Estoque Crítico ou Alerta")
+    criticos = pedido_alerta[pedido_alerta['Status'] != '🟢 Ok']
+    st.dataframe(criticos[['Item ID', 'Name', 'Estoque Atual', 'Estoque Necessário até Pedido', 'Status']], use_container_width=True)
 
     st.subheader("Ranking de Consumo (Top 10)")
     ranking = pedido_alerta.sort_values(by='Consumo Médio Diário', ascending=False).head(10)
-    fig = px.bar(ranking, x='Name', y='Consumo Médio Diário', color='Criticidade', title='Top 10 Consumo Médio Diário')
-    st.plotly_chart(fig, use_container_width=True)
+    st.bar_chart(ranking.set_index('Name')['Consumo Médio Diário'])
+
+elif menu == "Histórico & Análise":
+    st.header("📊 Análise Histórica de Consumo e Estoque")
+    st.subheader("Histórico Completo de Movimentação")
+    st.dataframe(inventory_df[['Inventory ID', 'Item ID', 'DateTime', 'Amount']], use_container_width=True)
+
+    st.subheader("Total de Movimentações por Item")
+    total_mov = inventory_df.groupby('Item ID')['Amount'].count().reset_index(name='Total Movimentações')
+    total_mov = pd.merge(total_mov, items_df[['Item ID', 'Name']], on='Item ID', how='left')
+    st.dataframe(total_mov[['Item ID', 'Name', 'Total Movimentações']], use_container_width=True)
+
+    st.subheader("Gráfico Histórico de Entradas e Saídas")
+    entradas_saidas = inventory_df.copy()
+    entradas_saidas['Mês/Ano'] = entradas_saidas['DateTime'].dt.to_period('M')
+    entradas_saidas = entradas_saidas.groupby(['Mês/Ano'])['Amount'].sum().reset_index()
+    fig, ax = plt.subplots()
+    ax.bar(entradas_saidas['Mês/Ano'].astype(str), entradas_saidas['Amount'])
+    plt.xticks(rotation=90)
+    plt.title('Saldo Mensal de Movimentação')
+    st.pyplot(fig)
 
 # -------------------- RODAPÉ --------------------
 st.markdown("---")
-st.markdown("**COGEX ALMOXARIFADO - Motor Matemático Fuzzy Avançado | Powered by Streamlit**")
+st.markdown("**COGEX ALMOXARIFADO - Gestão Matemática Real com Critérios de Estoque | Powered by Streamlit**")
