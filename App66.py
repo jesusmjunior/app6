@@ -5,7 +5,6 @@ import plotly.express as px  # Certifique-se de adicionar 'plotly' ao requiremen
 
 # -------------------- CONFIGURAÇÕES INICIAIS --------------------
 st.set_page_config(page_title="COGEX Almoxarifado", layout="wide")
-
 st.title("📦 COGEX ALMOXARIFADO")
 st.markdown("**Sistema Integrado Google Sheets - Controle Matemático e Visual de Estoque com Lógica Fuzzy Avançada**")
 
