@@ -39,8 +39,8 @@ def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dia
 
     resultado = pd.merge(estoque_atual, consumo_medio, on='Item ID', how='left')
     resultado['Consumo Médio Diário'].fillna(0, inplace=True)
-    nome_map = dict(zip(items_df['Item ID'], items_df['Name']))
-    desc_map = dict(zip(items_df['Item ID'], items_df['Description']))
+    nome_map = dict(zip(items_df['Item ID'].drop_duplicates(), items_df['Name'].drop_duplicates()))
+    desc_map = dict(zip(items_df['Item ID'].drop_duplicates(), items_df['Description'].drop_duplicates()))
     resultado['Nome Produto'] = resultado['Item ID'].map(nome_map)
     resultado['Descrição'] = resultado['Item ID'].map(desc_map)
 
