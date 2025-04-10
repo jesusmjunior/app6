@@ -18,9 +18,9 @@ def preparar_dados(items_df, inventory_df):
     return items_df, inventory_df
 
 def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dias_media):
-    inicio_periodo = inventory_df['DateTime'].min()
-    fim_periodo = inventory_df['DateTime'].max()
-    periodo_pre_d = inventory_df.copy()
+    inicio_periodo = pd.to_datetime('2024-11-01')
+    fim_periodo = pd.to_datetime('2025-02-28')
+    periodo_pre_d = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) & (inventory_df['DateTime'] <= fim_periodo)].copy()
 
     entradas = periodo_pre_d[periodo_pre_d['Amount'] > 0]
     saidas = periodo_pre_d[periodo_pre_d['Amount'] < 0]
@@ -33,23 +33,21 @@ def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dia
     resultado['Nome Produto'] = resultado['Item ID'].map(nome_map)
     resultado['Descrição'] = resultado['Item ID'].map(desc_map)
 
-    pontos_fixos = {
-        "4c44f391": 28, "cdb7c49d": 40, "a31fa3e6": 25, "7185e46c": 62,
-        "4f0b6e6d": 29, "874f4c45": 26, "03bcd290": 30, "22355245": 36,
-        "3809b5ae": 15, "f539ee95": 44, "4551c5df": 28, "cadc39ff": 20,
-        "e38864a9": 25, "c125aed6": 23, "faa39ab7": 18, "a500234e": 17,
-        "732098bc": 36, "1e85205e": 20, "72e50b91": 20, "f43363c9": 21,
-        "e9499711": 27, "bb079e20": 40, "887becc9": 48, "767c19cf": 60,
-        "42a8f594": 37, "412e20d0": 35, "77ab23ba": 17, "a42ac7a3": 22,
-        "3eda129c": 26, "e98c4af8": 27, "0f1c83e8": 36, "da0a9126": 28,
-        "e717180d": 30, "4b447dff": 31, "5a866829": 23, "b10220c8": 16,
-        "2e0c6d14": 33, "5a6a0e8c": 17
-    }
+    # Média de consumo diária
+    dias_periodo = (fim_periodo - inicio_periodo).days or 1
+    saidas['Consumo'] = saidas['Amount'].abs()
+    consumo_medio = saidas.groupby('Item ID')['Consumo'].sum() / dias_periodo
+    consumo_medio = consumo_medio.reset_index()
+    consumo_medio.columns = ['Item ID', 'Consumo Médio Diário']
 
-    resultado['Ponto de Pedido'] = resultado['Item ID'].map(pontos_fixos).fillna(10).astype(int)
+    resultado = resultado.merge(consumo_medio, on='Item ID', how='left')
+    resultado['Consumo Médio Diário'] = resultado['Consumo Médio Diário'].fillna(0)
+
+    # Ponto de Pedido calculado com base no consumo médio diário * 15 dias * 0.8
+    resultado['Ponto de Pedido'] = (resultado['Consumo Médio Diário'] * 15 * 0.8).round().astype(int)
 
     for dias in [7, 15, 30, 45]:
-        resultado[f'Necessidade {dias} dias'] = resultado['Ponto de Pedido']
+        resultado[f'Necessidade {dias} dias'] = (resultado['Consumo Médio Diário'] * dias).round()
 
     resultado['Estoque Mínimo'] = resultado['Ponto de Pedido'] * (estoque_seguranca / 100)
 
