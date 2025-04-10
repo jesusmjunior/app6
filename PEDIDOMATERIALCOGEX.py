@@ -13,31 +13,24 @@ def carregar_dados():
     return items_df, inventory_df
 
 # Função para cálculo do estoque
+
 def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca):
     # Ajustar IDs
-    items_df['Item ID'] = items_df['Item ID'].str.strip()
-    inventory_df['Item ID'] = inventory_df['Item ID'].str.strip()
-
-    # Filtrar período: Novembro até 02/02, ignorando 12/02 reconferência
-    inicio_periodo = pd.to_datetime('2019-11-01')
-    fim_periodo = pd.to_datetime('2020-02-02')
-
-    inventory_periodo = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) &
-                                     (inventory_df['DateTime'] <= fim_periodo) &
-                                     (inventory_df['DateTime'].dt.strftime('%Y-%m-%d') != '2020-02-12')].copy()
+    items_df['Item ID'] = items_df['Item ID'].astype(str).str.strip()
+    inventory_df['Item ID'] = inventory_df['Item ID'].astype(str).str.strip()
 
     # Separar entradas e saídas
-    entradas = inventory_periodo[inventory_periodo['Amount'] > 0]
-    saidas = inventory_periodo[inventory_periodo['Amount'] < 0]
+    entradas = inventory_df[inventory_df['Amount'] > 0]
+    saidas = inventory_df[inventory_df['Amount'] < 0]
 
     # Estoque Atual
-    estoque_atual = inventory_periodo.groupby('Item ID')['Amount'].sum().reset_index()
+    estoque_atual = inventory_df.groupby('Item ID')['Amount'].sum().reset_index()
     estoque_atual.columns = ['Item ID', 'Estoque Atual']
 
     # Consumo Médio Diário
     consumo_df = saidas.copy()
     consumo_df['Amount'] = consumo_df['Amount'].abs()
-    dias_periodo = (inventory_periodo['DateTime'].max() - inventory_periodo['DateTime'].min()).days or 1
+    dias_periodo = (inventory_df['DateTime'].max() - inventory_df['DateTime'].min()).days or 1
     consumo_medio = consumo_df.groupby('Item ID')['Amount'].sum() / dias_periodo
     consumo_medio = consumo_medio.reset_index()
     consumo_medio.columns = ['Item ID', 'Consumo Médio Diário']
@@ -66,9 +59,9 @@ def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca):
         else:
             return 'Verde - OK'
 
-    resultado['Status até 02/02'] = resultado.apply(definir_status, axis=1)
+    resultado['Status Atual'] = resultado.apply(definir_status, axis=1)
 
-    return resultado, entradas, saidas, inventory_periodo
+    return resultado, entradas, saidas, inventory_df
 
 # --------- INÍCIO DO APP ---------
 st.set_page_config(page_title="Dashboard Estoque", layout="wide")
@@ -86,11 +79,11 @@ estoque_seguranca = st.sidebar.slider("% Estoque de Segurança:", 10, 100, 50, s
 # Calcular estoque
 resultado, entradas, saidas, inventario = calcular_estoque(items_df, inventory_df, pd.to_datetime(data_pedido), estoque_seguranca)
 
-# Exibir Histórico Geral
-st.subheader("📋 Histórico de Movimentação (Novembro a 02/02, sem 12/02)")
+# Histórico Geral
+st.subheader("📋 Histórico de Movimentação")
 st.dataframe(inventario[['Item ID', 'DateTime', 'Amount']])
 
-# Exibir entradas e saídas separadas
+# Entradas e Saídas
 col1, col2 = st.columns(2)
 with col1:
     st.write("### ➕ Entradas de Estoque")
@@ -99,16 +92,16 @@ with col2:
     st.write("### ➖ Saídas de Estoque")
     st.dataframe(saidas[['Item ID', 'DateTime', 'Amount']])
 
-# Exibir por status
+# Status
 st.subheader(f"📅 Status dos Produtos para {periodo} dias")
 status_tabs = st.tabs(["🔴 Crítico", "🟡 Médio", "🟢 OK"])
 
 for idx, status in enumerate(['Vermelho - Alerta Crítico', 'Amarelo - Alerta Médio', 'Verde - OK']):
     with status_tabs[idx]:
-        st.dataframe(resultado[resultado['Status até 02/02'] == status][['Item ID', 'Nome Produto', 'Estoque Atual', f'Necessidade {periodo} dias', 'Estoque Mínimo', 'Status até 02/02']])
+        st.dataframe(resultado[resultado['Status Atual'] == status][['Item ID', 'Nome Produto', 'Estoque Atual', f'Necessidade {periodo} dias', 'Estoque Mínimo', 'Status Atual']])
 
-# Gerar arquivo
-st.subheader("📄 Gerar Pedido de Material")
+# Gerar Pedido
+st.subheader("📄 Pedido de Material")
 
 pedido = resultado.copy()
 pedido['Qtd a Pedir'] = (pedido[f'Necessidade {periodo} dias'] - pedido['Estoque Atual'] + pedido['Estoque Mínimo']).apply(lambda x: max(0, round(x)))
