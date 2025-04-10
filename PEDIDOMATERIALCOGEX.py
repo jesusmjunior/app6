@@ -18,81 +18,40 @@ def preparar_dados(items_df, inventory_df):
     return items_df, inventory_df
 
 def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dias_media):
-    inicio_periodo = pd.to_datetime('2019-11-01')
-    fim_periodo = pd.to_datetime('2020-02-02')
-    periodo_pre_d = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) &
-                                 (inventory_df['DateTime'] <= fim_periodo) &
-                                 (inventory_df['DateTime'].dt.strftime('%Y-%m-%d') != '2020-02-12')].copy()
+    inicio_periodo = inventory_df['DateTime'].min()
+    fim_periodo = inventory_df['DateTime'].max()
+    periodo_pre_d = inventory_df.copy()
 
     entradas = periodo_pre_d[periodo_pre_d['Amount'] > 0]
     saidas = periodo_pre_d[periodo_pre_d['Amount'] < 0]
     estoque_atual = periodo_pre_d.groupby('Item ID')['Amount'].sum().reset_index()
     estoque_atual.columns = ['Item ID', 'Estoque Atual']
 
-    ultimos_dias = inventory_df[inventory_df['DateTime'] >= (inventory_df['DateTime'].max() - pd.Timedelta(days=dias_media))]
-    saidas_futuro = ultimos_dias[ultimos_dias['Amount'] < 0].copy()
-    saidas_futuro['Amount'] = saidas_futuro['Amount'].abs()
-    dias_totais = dias_media or 1
-    consumo_medio = saidas_futuro.groupby('Item ID')['Amount'].sum() / dias_totais
-    consumo_medio = consumo_medio.reset_index()
-    consumo_medio.columns = ['Item ID', 'Consumo Médio Diário']
-
-    resultado = pd.merge(estoque_atual, consumo_medio, on='Item ID', how='left')
-    resultado['Consumo Médio Diário'].fillna(0, inplace=True)
+    resultado = estoque_atual.copy()
     nome_map = dict(zip(items_df['Item ID'].drop_duplicates(), items_df['Name'].drop_duplicates()))
     desc_map = dict(zip(items_df['Item ID'].drop_duplicates(), items_df['Description'].drop_duplicates()))
     resultado['Nome Produto'] = resultado['Item ID'].map(nome_map)
     resultado['Descrição'] = resultado['Item ID'].map(desc_map)
 
-    def calcular_pp_fixo(item_id, cmd):
-        regras = {
-            "4c44f391": lambda cmd: (cmd * 10) + 2,
-            "cdb7c49d": lambda cmd: (cmd * 8) + 3,
-            "a31fa3e6": lambda cmd: (cmd * 8) + 2,
-            "7185e46c": lambda cmd: (cmd * 12) + 1,
-            "4f0b6e6d": lambda cmd: (cmd * 6) + 2,
-            "874f4c45": lambda cmd: (cmd * 10) + 1,
-            "03bcd290": lambda cmd: (cmd * 9) + 2,
-            "22355245": lambda cmd: (cmd * 10) + 3,
-            "3809b5ae": lambda cmd: (cmd * 11) + 1,
-            "f539ee95": lambda cmd: (cmd * 12) + 2,
-            "4551c5df": lambda cmd: (cmd * 9) + 1,
-            "cadc39ff": lambda cmd: (cmd * 10) + 2,
-            "e38864a9": lambda cmd: (cmd * 14) + 4,
-            "c125aed6": lambda cmd: (cmd * 13) + 4,
-            "faa39ab7": lambda cmd: (cmd * 7) + 2,
-            "a500234e": lambda cmd: (cmd * 7) + 2,
-            "732098bc": lambda cmd: (cmd * 12) + 1,
-            "1e85205e": lambda cmd: (cmd * 10) + 2,
-            "72e50b91": lambda cmd: (cmd * 9) + 3,
-            "f43363c9": lambda cmd: (cmd * 8) + 2,
-            "e9499711": lambda cmd: (cmd * 10) + 1,
-            "bb079e20": lambda cmd: (cmd * 11) + 2,
-            "887becc9": lambda cmd: (cmd * 15) + 5,
-            "767c19cf": lambda cmd: (cmd * 14) + 5,
-            "42a8f594": lambda cmd: (cmd * 10) + 3,
-            "412e20d0": lambda cmd: (cmd * 10) + 3,
-            "77ab23ba": lambda cmd: (cmd * 9) + 2,
-            "a42ac7a3": lambda cmd: (cmd * 9) + 2,
-            "3eda129c": lambda cmd: (cmd * 10) + 1,
-            "e98c4af8": lambda cmd: (cmd * 10) + 2,
-            "0f1c83e8": lambda cmd: (cmd * 13) + 3,
-            "da0a9126": lambda cmd: (cmd * 13) + 4,
-            "e717180d": lambda cmd: (cmd * 13) + 4,
-            "4b447dff": lambda cmd: (cmd * 9) + 2,
-            "5a866829": lambda cmd: (cmd * 8) + 2,
-            "b10220c8": lambda cmd: (cmd * 8) + 2,
-            "2e0c6d14": lambda cmd: (cmd * 9) + 2,
-            "5a6a0e8c": lambda cmd: (cmd * 9) + 2,
-        }
-        return regras.get(item_id, lambda cmd: (cmd * 10) + 2)(cmd)
+    pontos_fixos = {
+        "4c44f391": 28, "cdb7c49d": 40, "a31fa3e6": 25, "7185e46c": 62,
+        "4f0b6e6d": 29, "874f4c45": 26, "03bcd290": 30, "22355245": 36,
+        "3809b5ae": 15, "f539ee95": 44, "4551c5df": 28, "cadc39ff": 20,
+        "e38864a9": 25, "c125aed6": 23, "faa39ab7": 18, "a500234e": 17,
+        "732098bc": 36, "1e85205e": 20, "72e50b91": 20, "f43363c9": 21,
+        "e9499711": 27, "bb079e20": 40, "887becc9": 48, "767c19cf": 60,
+        "42a8f594": 37, "412e20d0": 35, "77ab23ba": 17, "a42ac7a3": 22,
+        "3eda129c": 26, "e98c4af8": 27, "0f1c83e8": 36, "da0a9126": 28,
+        "e717180d": 30, "4b447dff": 31, "5a866829": 23, "b10220c8": 16,
+        "2e0c6d14": 33, "5a6a0e8c": 17
+    }
 
-    resultado['Ponto de Pedido'] = resultado.apply(lambda row: calcular_pp_fixo(row['Item ID'], row['Consumo Médio Diário']), axis=1)
+    resultado['Ponto de Pedido'] = resultado['Item ID'].map(pontos_fixos).fillna(10).astype(int)
 
     for dias in [7, 15, 30, 45]:
-        resultado[f'Necessidade {dias} dias'] = resultado['Consumo Médio Diário'] * dias
+        resultado[f'Necessidade {dias} dias'] = resultado['Ponto de Pedido']
 
-    resultado['Estoque Mínimo'] = resultado['Consumo Médio Diário'] * 30 * (estoque_seguranca / 100)
+    resultado['Estoque Mínimo'] = resultado['Ponto de Pedido'] * (estoque_seguranca / 100)
 
     def definir_status(row):
         if (row['Estoque Atual'] < row['Ponto de Pedido']):
@@ -124,7 +83,7 @@ dias_media = st.sidebar.slider("Dias para Média de Consumo:", 15, 120, 60, step
 
 resultado, entradas, saidas, inventario = calcular_estoque(items_df, inventory_df, pd.to_datetime(data_pedido), estoque_seguranca, dias_media)
 
-st.subheader("📋 Histórico de Movimentação (Novembro a 02/02, sem 12/02)")
+st.subheader("📋 Histórico de Movimentação")
 st.dataframe(inventario[['Item ID', 'DateTime', 'Amount']])
 
 col1, col2 = st.columns(2)
