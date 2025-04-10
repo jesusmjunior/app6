@@ -18,9 +18,9 @@ def preparar_dados(items_df, inventory_df):
     return items_df, inventory_df
 
 def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dias_media):
-    inicio_periodo = pd.to_datetime('2024-11-01')
-    fim_periodo = pd.to_datetime('2025-02-28')
-    periodo_pre_d = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) & (inventory_df['DateTime'] <= fim_periodo)].copy()
+    inicio_periodo = inventory_df['DateTime'].min()
+    fim_periodo = inventory_df['DateTime'].max()
+    periodo_pre_d = inventory_df.copy()
 
     entradas = periodo_pre_d[periodo_pre_d['Amount'] > 0]
     saidas = periodo_pre_d[periodo_pre_d['Amount'] < 0]
@@ -34,16 +34,16 @@ def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dia
     resultado['Descrição'] = resultado['Item ID'].map(desc_map)
 
     pontos_fixos = {
-        "4c44f391": 22, "cdb7c49d": 32, "a31fa3e6": 20, "7185e46c": 50,
-        "4f0b6e6d": 23, "874f4c45": 21, "03bcd290": 24, "22355245": 29,
-        "3809b5ae": 12, "f539ee95": 35, "4551c5df": 22, "cadc39ff": 16,
-        "e38864a9": 20, "c125aed6": 18, "faa39ab7": 14, "a500234e": 14,
-        "732098bc": 29, "1e85205e": 16, "72e50b91": 16, "f43363c9": 17,
-        "e9499711": 22, "bb079e20": 32, "887becc9": 38, "767c19cf": 48,
-        "42a8f594": 30, "412e20d0": 28, "77ab23ba": 14, "a42ac7a3": 18,
-        "3eda129c": 21, "e98c4af8": 22, "0f1c83e8": 29, "da0a9126": 22,
-        "e717180d": 24, "4b447dff": 25, "5a866829": 18, "b10220c8": 13,
-        "2e0c6d14": 26, "5a6a0e8c": 14
+        "4c44f391": 28, "cdb7c49d": 40, "a31fa3e6": 25, "7185e46c": 62,
+        "4f0b6e6d": 29, "874f4c45": 26, "03bcd290": 30, "22355245": 36,
+        "3809b5ae": 15, "f539ee95": 44, "4551c5df": 28, "cadc39ff": 20,
+        "e38864a9": 25, "c125aed6": 23, "faa39ab7": 18, "a500234e": 17,
+        "732098bc": 36, "1e85205e": 20, "72e50b91": 20, "f43363c9": 21,
+        "e9499711": 27, "bb079e20": 40, "887becc9": 48, "767c19cf": 60,
+        "42a8f594": 37, "412e20d0": 35, "77ab23ba": 17, "a42ac7a3": 22,
+        "3eda129c": 26, "e98c4af8": 27, "0f1c83e8": 36, "da0a9126": 28,
+        "e717180d": 30, "4b447dff": 31, "5a866829": 23, "b10220c8": 16,
+        "2e0c6d14": 33, "5a6a0e8c": 17
     }
 
     resultado['Ponto de Pedido'] = resultado['Item ID'].map(pontos_fixos).fillna(10).astype(int)
