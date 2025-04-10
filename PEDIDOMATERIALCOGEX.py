@@ -18,9 +18,9 @@ def preparar_dados(items_df, inventory_df):
     return items_df, inventory_df
 
 def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dias_media):
-    inicio_periodo = pd.to_datetime('2024-11-01')
-    fim_periodo = pd.to_datetime('2025-02-28')
-    periodo_pre_d = inventory_df[(inventory_df['DateTime'] >= inicio_periodo) & (inventory_df['DateTime'] <= fim_periodo)].copy()
+    inicio_periodo = inventory_df['DateTime'].min()
+    fim_periodo = inventory_df['DateTime'].max()
+    periodo_pre_d = inventory_df.copy()
 
     entradas = periodo_pre_d[periodo_pre_d['Amount'] > 0]
     saidas = periodo_pre_d[periodo_pre_d['Amount'] < 0]
