@@ -7,7 +7,7 @@ from datetime import datetime
 def carregar_dados():
     items_url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?output=csv&gid=1011017078'
     inventory_url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSeWsxmLFzuWsa2oggpQb6p5SFapxXHcWaIl0Jjf2wAezvMgAV9XCc1r7fSSzRWTCgjk9eqREgWlrzp/pub?output=csv&gid=1710164548'
-    
+
     items_df = pd.read_csv(items_url)
     inventory_df = pd.read_csv(inventory_url, parse_dates=['DateTime'], dayfirst=True)
     return items_df, inventory_df
