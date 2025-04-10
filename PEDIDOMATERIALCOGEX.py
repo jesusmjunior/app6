@@ -34,16 +34,16 @@ def calcular_estoque(items_df, inventory_df, data_pedido, estoque_seguranca, dia
     resultado['Descrição'] = resultado['Item ID'].map(desc_map)
 
     pontos_fixos = {
-        "4c44f391": 8, "cdb7c49d": 10, "a31fa3e6": 5, "7185e46c": 12,
-        "4f0b6e6d": 9, "874f4c45": 6, "03bcd290": 10, "22355245": 6,
-        "3809b5ae": 10, "f539ee95": 4, "4551c5df": 8, "cadc39ff": 10,
-        "e38864a9": 10, "c125aed6": 13, "faa39ab7": 8, "a500234e": 7,
-        "732098bc": 6, "1e85205e": 10, "72e50b91": 10, "f43363c9": 11,
-        "e9499711": 7, "bb079e20": 8, "887becc9": 8, "767c19cf": 6,
-        "42a8f594": 7, "412e20d0": 5, "77ab23ba": 7, "a42ac7a3": 09,
-        "3eda129c": 6, "e98c4af8": 7, "0f1c83e8": 6, "da0a9126": 8,
-        "e717180d": 10, "4b447dff": 11, "5a866829": 13, "b10220c8": 6,
-        "2e0c6d14": 13, "5a6a0e8c": 7
+        "4c44f391": 08, "cdb7c49d": 10, "a31fa3e6": 05, "7185e46c": 12,
+        "4f0b6e6d": 09, "874f4c45": 06, "03bcd290": 10, "22355245": 06,
+        "3809b5ae": 10, "f539ee95": 04, "4551c5df": 08, "cadc39ff": 10,
+        "e38864a9": 10, "c125aed6": 13, "faa39ab7": 08, "a500234e": 07,
+        "732098bc": 06, "1e85205e": 10, "72e50b91": 10, "f43363c9": 11,
+        "e9499711": 07, "bb079e20": 08, "887becc9": 08, "767c19cf": 06,
+        "42a8f594": 07, "412e20d0": 05, "77ab23ba": 07, "a42ac7a3": 09,
+        "3eda129c": 06, "e98c4af8": 07, "0f1c83e8": 06, "da0a9126": 08,
+        "e717180d": 10, "4b447dff": 11, "5a866829": 13, "b10220c8": 06,
+        "2e0c6d14": 13, "5a6a0e8c": 07
     }
 
     resultado['Ponto de Pedido'] = resultado['Item ID'].map(pontos_fixos).fillna(10).astype(int)
